@@ -1,0 +1,64 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: "AWS::Serverless-2016-10-31"
+Description: |
+  Monitor S3 File Delivery using CloudWatch Events
+  Lambda Function is Invoked by the Events to Sends SNS Notification to Endpoint
+Parameters:
+  PershingBucket:
+    Description: Bucket name where the pershing files come
+    Type: String
+    Default: trailbucket04292020
+  PershingFilePrefix:
+    Description: Prefix where pershing files land
+    Type: String
+    Default: pershingsftp/FILES
+Globals:
+  Function:
+    Timeout: 10
+    CodeUri: src/
+    Runtime: python3.8
+
+Resources:
+  EventsLambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index_handler.handler
+      Description: Notifies when file are received at S3 bucket after a specified time.
+      MemorySize: 256
+      Environment:
+        Variables:
+          TOPIC_ARN: !Sub ${NotifySNS}
+      Policies:
+      - SNSPublishMessagePolicy:
+          TopicName: !GetAtt NotifySNS.TopicName
+      - S3ReadPolicy:
+          BucketName: !Ref PershingBucket
+      Events:
+        FileCreated:
+          Type: CloudWatchEvent
+          Properties:
+            Pattern:
+              source:
+              - aws.s3
+              detail-type:
+              - AWS API Call via CloudTrail
+              detail:
+                eventSource:
+                - s3.amazonaws.com
+                eventName:
+                - PutObject
+                - CopyObject
+                - CompleteMultipartUpload
+                requestParameters:
+                  bucketName:
+                  - Ref: PershingBucket
+                  key:
+                  - prefix:
+                      Ref: PershingFilePrefix
+  
+  NotifySNS: 
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: Late File Delivery Notification
+      TopicName: s3filesdelivery
+
