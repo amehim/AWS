@@ -1,0 +1,123 @@
+import json
+import os
+import boto3
+import botocore
+from datetime import datetime
+import time
+
+sns_topic_arn = os.environ['TOPIC_ARN']
+sns_client = boto3.client('sns')
+s3_client = boto3.client('s3')
+
+
+def get_upload_time(event):
+    event_time = event['detail']['eventTime']
+    event_time = event_time.replace('T', ' ')[:-1]
+    date_time = datetime.strptime(event_time, '%Y-%m-%d %H:%M:%S')
+    time  = date_time.time()
+    return time
+
+
+def get_file_name(event): 
+    prefix = event['detail']['requestParameters']['key'] 
+    list0 = prefix.split("/") 
+    list1 = list0[len(list0) - 1 ] 
+    file_name = list1.split(".")[0] 
+    return file_name
+
+
+def time_difference(upload_hour, max_hour):
+    print ("File expected at:" ,max_hour , " arrived at ", upload_hour )
+    return (upload_hour > max_hour)
+    
+
+def publish_sns(sns_topic_arn, subject, message):
+    response = sns_client.publish(
+        TopicArn=sns_topic_arn,
+        Message=message,
+        Subject=subject
+    )
+    print (response)
+
+
+def does_s3_file_exist(bucket, key):
+    try:
+        response = s3_client.get_object(
+            Bucket= bucket,
+            Key= key
+        )
+        print ("File found on S3")
+        return True
+    except botocore.exceptions.ClientError as exception:
+        if exception.response['Error']['Code'] == 'NoSuchKey':
+            print ("File not found on S3")
+            return False
+
+
+def get_max_hour(file_name):
+    if file_name == "4ICR" or file_name == "4RSI" or file_name == "4NTB" or file_name == "4MFD":
+        return datetime.strptime('01:00', '%H:%M').time()
+    elif file_name == "4GMO" or file_name ==  "4ASP" or file_name == "4FUN":
+        return datetime.strptime('01:30', '%H:%M').time()
+    elif file_name == "4CRM" or file_name == "4AC2" or file_name == "4PTL":
+        return datetime.strptime('02:30', '%H:%M').time()
+    elif file_name == "4RMI" or file_name == "4OEL":
+        return datetime.strptime('03:00', '%H:%M').time()
+    elif file_name == "4RTE" or file_name == "4POT" or file_name == "4ACR":
+        return datetime.strptime('03:30', '%H:%M').time()
+    elif file_name == "4OEG" or file_name == "4GTL":
+        return datetime.strptime('04:00', '%H:%M').time()
+    elif file_name == "4MTE":
+        return datetime.strptime('04:30', '%H:%M').time()
+    elif file_name == "4SPP":
+        return datetime.strptime('10:30', '%H:%M').time()
+    elif file_name == "4PO7" or file_name == "4ACC":
+        return datetime.strptime('21:00', '%H:%M').time()
+    elif file_name == "4GAC" or file_name == "CKFQ" or file_name == "4GTD" or file_name == "4AMS":
+        return datetime.strptime('22:00', '%H:%M').time()
+    elif file_name == "4ISA":
+        return datetime.strptime('22:30', '%H:%M').time()
+    elif file_name == "4SEL" or file_name == "4CCF" or file_name == "4HHL":
+        return datetime.strptime('23:00', '%H:%M').time()
+    elif file_name == "4GCU" or file_name == "4DVR":
+        return datetime.strptime('23:30', '%H:%M').time()
+
+    
+def handler(event, context):
+    if "action" in event:
+        print("Case 01")
+        bucket = event["bucket"]
+        prefix = event["prefix"]
+        file = event["file"]
+        date = datetime.utcnow().strftime("%m%d%y")
+        print ("Checking for files ", file, "at ", date)
+        file_suffix_name = file.split(".")[0]
+        file_max_hour = get_max_hour(file_suffix_name)
+        file_full_name = prefix +"/" + file
+        
+        if not does_s3_file_exist(bucket, file_full_name):
+            print ("Sending SNS notification")
+            message="The file " +date+"." + file_suffix_name + ".zip was expected to arrive at " + str(file_max_hour) + " in s3 bucket " + bucket + " but has not arrived."
+            subject = "File " +date+ "." + file_suffix_name + ".zip did not arrive."
+            publish_sns(sns_topic_arn, subject, message)
+    elif "detail" in event:
+        print("Case 02")
+        #getting file name
+        file_name = get_file_name(event)
+        prefix = datetime.utcnow().strftime("%m%d%y")
+        #event time
+        #hours, minutes = get_upload_time(event)
+        upload_time = get_upload_time(event)
+        print("...........file recievied : ", file_name , " at ", upload_time)
+        
+        message = ""
+        subject = ""
+        file_max_hour = get_max_hour(file_name)
+        if time_difference(upload_time, file_max_hour):
+            message="The file "+prefix+"."+file_name+".zip was expected to arrive at "+str(file_max_hour)+" but arrived late at " + str(upload_time) +  "."
+            subject ="The file "+prefix+"."+file_name+".zip arrived late."
+            print ("Sending SNS notification")
+            publish_sns(sns_topic_arn, subject, message)
+            print ("SNS notification Sent")
+            
+            
